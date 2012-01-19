@@ -332,7 +332,10 @@ def build_docs(project, version, pdf, man, epub, record, force, update_output={}
             #version.active = True
             #version.built = True
             #version.save()
-            api.version(version.pk).put({'active': True, 'built': True})
+            version_data = api.version(version.pk).get()
+            version_data['active'] = True
+            version_data['built'] = True
+            api.version(version.pk).put(version_data)
     if html_builder.changed:
         if record:
             output_data = error_data = ''
