@@ -1,6 +1,8 @@
 from django.utils import simplejson as json
 import httplib2
 
+from .slum import api
+
 BASE_SERVER = 'http://djangopackages.com'
 API_SERVER = '%s/api/v1/' % BASE_SERVER
 
@@ -14,7 +16,8 @@ def import_project(project):
         return False
     if resp['status'] == '200':
         content_dict = json.loads(content)
-        project.django_packages_url = BASE_SERVER + content_dict['absolute_url']
-        project.save()
+        project_data = api.project(project.pk).get()
+        project_data['django_packages_url'] = BASE_SERVER + content_dict['absolute_url']
+        api.project(project.pk).put(project_data)
         return True
     return False
