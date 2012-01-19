@@ -15,7 +15,7 @@ import redis
 from sphinx.ext.intersphinx import fetch_inventory
 
 
-from builds.models import Build, Version
+from builds.models import Version
 from doc_builder import loading as builder_loading
 from doc_builder.base import restoring_chdir
 from projects.exceptions import ProjectImportError
@@ -69,14 +69,13 @@ def update_docs(pk, record=True, pdf=True, man=True, epub=True, version_pk=None,
     project = Project(**project_data)
     def new_save(*args, **kwargs):
         #fields = [(field, field.value_to_string(self)) for field in self._meta.fields]
-        print "Saving:"
+        print "*** Called save on a non-real object."
         #print fields
+        #raise TypeError('Not a real model')
         return 0
     project.save = new_save
-    #project = Project.objects.live().get(pk=pk)
     print "Building %s" % project
     if version_pk:
-        version = Version.objects.get(pk=version_pk)
         version_data = api.version(version_pk).get()
     else:
         branch = project.default_branch or project.vcs_repo().fallback_branch
@@ -85,23 +84,20 @@ def update_docs(pk, record=True, pdf=True, man=True, epub=True, version_pk=None,
     version_data['project'] = project
     version = Version(**version_data)
     version.save = new_save
-    """
-    version, created = Version.objects.get_or_create(
-        project=project, slug='latest')
+
     #Lots of course correction.
     to_save = False
     if not version.verbose_name:
-        version.verbose_name = 'latest'
+        version_data['verbose_name'] = 'latest'
         to_save = True
     if not version.active:
-        version.active = True
+        version_data['active'] = True
         to_save = True
     if version.identifier != branch:
-        version.identifier = branch
+        version_data['identifier'] = branch
         to_save = True
     if to_save:
-        version.save()
-    """
+        api.version(version.pk).put(version_data)
 
     #Make Dirs
     path = project.doc_path
@@ -195,16 +191,16 @@ def update_imported_docs(project, version):
         if version_repo.supports_tags:
             transaction.enter_transaction_management(True)
             tags = version_repo.tags
-            old_tags = Version.objects.filter(
-                project=project).values_list('identifier', flat=True)
+            old_tags = [obj['identifier'] for obj in api.version.get(project__slug=project.slug, limit=50)['objects']]
             for tag in tags:
                 if tag.identifier in old_tags:
                     continue
                 slug = slugify_uniquely(Version, tag.verbose_name,
                                         'slug', 255, project=project)
                 try:
-                    ver, created = Version.objects.get_or_create(
-                        project=project,
+
+                    api.version.post(
+                        project="/api/v1/project/%s/" % project.pk,
                         slug=slug,
                         identifier=tag.identifier,
                         verbose_name=tag.verbose_name
@@ -222,16 +218,15 @@ def update_imported_docs(project, version):
         if version_repo.supports_branches:
             transaction.enter_transaction_management(True)
             branches = version_repo.branches
-            old_branches = Version.objects.filter(
-                project=project).values_list('identifier', flat=True)
+            old_branches = [obj['identifier'] for obj in api.version.get(project__slug=project.slug, limit=50)['objects']]
             for branch in branches:
                 if branch.identifier in old_branches:
                     continue
                 slug = slugify_uniquely(Version, branch.verbose_name,
                                         'slug', 255, project=project)
                 try:
-                    ver, created = Version.objects.get_or_create(
-                        project=project,
+                    api.version.post(
+                        project="/api/v1/project/%s/" % project.pk,
                         slug=slug,
                         identifier=branch.identifier,
                         verbose_name=branch.verbose_name
@@ -241,13 +236,12 @@ def update_imported_docs(project, version):
                     print "Failed to create version (branch): %s" % e
                     transaction.rollback()
             transaction.leave_transaction_management()
-            #Kill deleted branches
-            Version.objects.filter(
-                project=project).exclude(identifier__in=old_branches).delete()
+            #TODO: Kill deleted branches
     except ValueError, e:
         print "Error getting tags: %s" % e
 
-    fileify(version)
+    #TODO: Find a better way to handle indexing.
+    #fileify(version)
     return update_docs_output
 
 
@@ -304,7 +298,7 @@ def update_created_docs(project):
         os.makedirs(doc_root)
 
     project.path = doc_root
-    project.save()
+    #project.save()
     #Touch a conf.py
     safe_write(os.path.join(project.path, 'conf.py'), '')
 
@@ -330,9 +324,6 @@ def build_docs(project, version, pdf, man, epub, record, force, update_output={}
     if successful:
         html_builder.move()
         if version:
-            #version.active = True
-            #version.built = True
-            #version.save()
             version_data = api.version(version.pk).get()
             version_data['active'] = True
             version_data['built'] = True
@@ -348,9 +339,6 @@ def build_docs(project, version, pdf, man, epub, record, force, update_output={}
                     output_data += data[1]
                     error_data += data[2]
             api.build.post(dict(
-            #Build.objects.create(
-                #project=project,
-                #version=version
                 project='/api/v1/project/%s/' % project.pk,
                 version='/api/v1/version/%s/' % version.pk,
                 success=successful,
@@ -358,7 +346,6 @@ def build_docs(project, version, pdf, man, epub, record, force, update_output={}
                 setup_error=error_data,
                 output=html_output[1],
                 error=html_output[2],
-            #)
             ))
         #XXX:dc: all builds should have their output checked
         if pdf:
@@ -391,8 +378,8 @@ def fileify(version):
                 if fnmatch.fnmatch(filename, '*.html'):
                     dirpath = os.path.join(root.replace(path, '').lstrip('/'),
                                             filename.lstrip('/'))
-                    file, new = ImportedFile.objects.get_or_create(
-                        project=project,
+                    api.importedfile.post(
+                        project="/api/v1/project/%s/" % project.pk,
                         path=dirpath,
                         name=filename)
 
@@ -425,7 +412,6 @@ def unzip_files(dest_file, html_path):
 
 @task
 def update_intersphinx(version_pk):
-    #version = Version.objects.get(pk=version_pk)
     version_data = api.version(version_pk).get()
     del version_data['resource_uri']
     project_data = version_data['project']
