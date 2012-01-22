@@ -13,6 +13,7 @@ from projects import constants
 from projects.utils import diff, dmp, safe_write
 from projects.utils import highest_version as _highest
 from taggit.managers import TaggableManager
+from tastyapi.slum import api
 
 from vcs_support.base import VCSProject
 from vcs_support.backends import backend_cls
@@ -324,7 +325,11 @@ class Project(models.Model):
         except IndexError:
             return None
 
+    def api_versions(self):
+        return api.version.get(project=self.pk, active=True)
+
     def active_versions(self):
+        api.version.filter(project=self.pk, built=True, active=True)
         return (self.versions.filter(built=True, active=True) |
                 self.versions.filter(active=True, uploaded=True))
 
